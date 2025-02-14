@@ -508,7 +508,7 @@ def command_show_cases():
         sys.exit(1)
 
     if cases:
-        print("\n📜 **List of Cases in the Blockchain:**")
+        print("\n **List of Cases in the Blockchain:**")
         for case_hex in sorted(cases):
             if args.password == owner_password:  # Decrypt if password is correct
                 try:
@@ -989,4 +989,3 @@ def main():
 if __name__ == "__main__":
     main()
 
-    
