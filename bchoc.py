@@ -25,22 +25,22 @@ from Crypto.Cipher import AES
 import subprocess
 
 # List of required libraries
-required_libraries = ["pycryptodome"]
+#required_libraries = ["pycryptodome"]
 
 # Ensure required libraries are installed
-for lib in required_libraries:
-    try:
-        __import__(lib)
-    except ImportError:
-        try:
-            subprocess.check_call(
-                [sys.executable, "-m", "pip", "install", lib],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
-            )
-        except subprocess.CalledProcessError:
-            print(f"> Failed to install {lib}", file=sys.stderr)
-            sys.exit(1)
+#for lib in required_libraries:
+ #   try:
+  #      __import__(lib)
+   # except ImportError:
+    #    try:
+     #       subprocess.check_call(
+      #          [sys.executable, "-m", "pip", "install", lib],
+       #         stdout=subprocess.DEVNULL,
+        #        stderr=subprocess.DEVNULL
+          #  )
+        #except subprocess.CalledProcessError:
+         #   print(f"> Failed to install {lib}", file=sys.stderr)
+          #  sys.exit(1)
 
 # --------------------------------------------------------------------
 # Constants and Block Structure Definitions
@@ -90,25 +90,52 @@ def create_genesis_block():
                          d_length)
     return header + data
 
+
+
+
 def check_genesis_block(file_path):
     """
     Reads the first block from the blockchain file and verifies that it is the Genesis block.
+    Also checks that the file structure is correct (header + data sizes).
     """
     try:
         with open(file_path, "rb") as f:
+            # Read Genesis block
             header_bytes = f.read(HEADER_SIZE)
             if len(header_bytes) != HEADER_SIZE:
                 return False, "File too small to contain a valid block."
             unpacked = struct.unpack(BLOCK_FORMAT, header_bytes)
             prev_hash, timestamp, case_id, evidence_id, state, creator, owner, d_length = unpacked
-            data_bytes = f.read(d_length)
+
             expected_state = b"INITIAL" + b"\0" * 5
-            if timestamp == 0.0 and case_id == b"0" * 32 and evidence_id == b"0" * 32 and state == expected_state:
-                return True, None
-            else:
+            if not (timestamp == 0.0 and
+                    prev_hash == b"0" * 32 and
+                    case_id == b"0" * 32 and
+                    evidence_id == b"0" * 32 and
+                    state == expected_state):
                 return False, "Genesis block fields do not match expected values."
+            
+            # Now, verify the entire file structure
+            while True:
+                data = f.read(d_length)
+                if len(data) != d_length:
+                    return False, "Data length mismatch."
+
+                next_header = f.read(HEADER_SIZE)
+                if not next_header:
+                    break  # End of file, OK
+                if len(next_header) != HEADER_SIZE:
+                    return False, "Incomplete block header found."
+
+                unpacked = struct.unpack(BLOCK_FORMAT, next_header)
+                d_length = unpacked[-1]  # Update for next loop
+
+        return True, None
     except Exception as e:
         return False, f"Error reading the blockchain file: {e}"
+
+
+
 
 def ensure_blockchain_initialized(file_path):
     """
@@ -162,12 +189,13 @@ def get_existing_item_ids(file_path):
 
 def get_last_block(file_path):
     """
-    Returns the raw bytes of the last block in the blockchain file.
+    Returns the raw bytes of the last complete block (header + data) from the blockchain file.
     """
-    last = None
+    last_block = None
     for block in iter_blocks(file_path):
-        last = block
-    return last
+        last_block = block  # Full header+data block
+    return last_block
+
 
 def compute_hash(block_bytes):
     """
@@ -184,8 +212,6 @@ def pad_field(value, length):
     if len(value) > length:
         return value[:length]
     return value + (b'\0' * (length - len(value)))
-
-
 
 def get_last_state(file_path, encrypted_item_id):
     """
@@ -255,7 +281,6 @@ def encrypt_item_id(item_id_str):
         print("> Invalid item id", file=sys.stderr)
         sys.exit(1)
 
-
 def decrypt_field(ciphertext_hex, is_uuid=False):
     """
     Decrypts a hex-encoded ciphertext using AES ECB mode.
@@ -281,7 +306,6 @@ def decrypt_field(ciphertext_hex, is_uuid=False):
     except Exception as e:
         print(f"Decryption error: {e}", file=sys.stderr)
         return None  # Return None on error
-
 
 def load_blocks_from_file(file_path):
     """
@@ -329,7 +353,7 @@ def command_init():
             sys.exit(0)
         else:
             print("> Blockchain file found but genesis block is invalid:", error_message, file=sys.stderr)
-            sys.exit(1)
+            sys.exit(0)
     else:
         genesis_block = create_genesis_block()
         try:
@@ -340,6 +364,11 @@ def command_init():
         except Exception as e:
             print("> Error creating blockchain file:", e, file=sys.stderr)
             sys.exit(1)
+
+
+
+
+# Commad_add
 
 def command_add():
     """
@@ -354,10 +383,11 @@ def command_add():
     args = parser.parse_args(sys.argv[2:])
 
     # Verify the creator's password
-    expected_creator_password = os.environ.get("BCHOC_PASSWORD_CREATOR", "C67C")
+    # expected_creator_password = os.environ.get("BCHOC_PASSWORD_CREATOR", "C67C")
+    expected_creator_password = os.environ.get("BCHOC_PASSWORD_CREATOR") or os.environ.get("BCHOC_PASSWORD") or "C67C"
     if args.password != expected_creator_password:
         print("> Invalid password")
-        sys.exit(1)
+        sys.exit(1) 
 
     file_path = os.environ.get("BCHOC_FILE_PATH", "blockchain.dat")
     ensure_blockchain_initialized(file_path)
@@ -383,6 +413,8 @@ def command_add():
         sys.exit(1)
 
     # Process each provided evidence item id
+
+    
     for item in args.item:
         try:
             item_int = int(item)
@@ -414,8 +446,7 @@ def command_add():
         # Use the current UTC timestamp
         timestamp = datetime.datetime.now(datetime.timezone.utc).timestamp()
 
-        # Set the state to "CHECKEDIN" (padded to 12 bytes)
-        state = pad_field(b"CHECKEDIN", 12)
+        state = b"CHECKEDIN" + b"\0" * (12 - len(b"CHECKEDIN"))
 
         # Prepare the creator field (padded to 12 bytes)
         creator_bytes = pad_field(args.creator.encode('ascii'), 12)
@@ -423,10 +454,10 @@ def command_add():
         # The owner field remains 12 null bytes
         owner = b"\0" * 12
 
-        # Prepare the Data field
         data_str = f"Added item: {item}\0"
         data_bytes = data_str.encode('ascii')
         d_length = len(data_bytes)
+
 
         # Pack the header
         header = struct.pack(BLOCK_FORMAT,
@@ -462,6 +493,11 @@ def command_add():
 
     f.close()
 
+
+
+
+
+
 # --------------------------------------------------------------------
 # Command Implementations show cases and show items
 # --------------------------------------------------------------------
@@ -474,8 +510,14 @@ def command_show_cases():
     parser.add_argument("-p", "--password", required=True, help="Owner password")
     args = parser.parse_args(sys.argv[3:])
 
-    owner_password = os.getenv("BCHOC_PASSWORD_OWNER", "ownerpass")
-    if args.password != owner_password:
+    valid_passwords = [
+        os.getenv("BCHOC_PASSWORD_POLICE", "P80P"),
+        os.getenv("BCHOC_PASSWORD_ANALYST", "A65A"),
+        os.getenv("BCHOC_PASSWORD_EXECUTIVE", "E69E"),
+        os.getenv("BCHOC_PASSWORD_LAWYER", "L76L"),
+    ]
+
+    if args.password not in valid_passwords:
         print("> Invalid password", file=sys.stderr)
         sys.exit(1)
 
@@ -488,44 +530,33 @@ def command_show_cases():
         for block in iter_blocks(file_path):
             header = block[:HEADER_SIZE]
             unpacked = struct.unpack(BLOCK_FORMAT, header)
-            enc_case_id = unpacked[2]  # Get the *encrypted* case ID
+            enc_case_id = unpacked[2]
 
-            # Skip the genesis block (case_id is b"0" * 32)
             if enc_case_id == b"0" * 32:
                 continue
 
-            # Add the *hex-encoded* ID to the set
             cases.add(enc_case_id.hex())
 
-    except FileNotFoundError:  # Handle file not found
-        print(f"> Blockchain file not found: {file_path}", file=sys.stderr)
-        sys.exit(1)
-    except struct.error:  # Handle struct unpack error (corrupted block)
-        print("> Error: Corrupted block encountered in blockchain.", file=sys.stderr)
-        sys.exit(1)
-    except Exception as e:  # Catch other exceptions
+    except Exception as e:
         print(f"> Error processing blockchain file: {e}", file=sys.stderr)
         sys.exit(1)
 
     if cases:
-        print("\n **List of Cases in the Blockchain:**")
+        print("> List of Cases in the Blockchain:")
         for case_hex in sorted(cases):
-            if args.password == owner_password:  # Decrypt if password is correct
-                try:
-                    enc_case_id = bytes.fromhex(case_hex)
-                    decrypted_case_id = decrypt_field(enc_case_id, is_uuid=True)  # Decrypt as UUID
-                    if decrypted_case_id:
-                        print(f"- {decrypted_case_id}")
-                    else:
-                        print(f"- Error decrypting case ID: {case_hex}", file=sys.stderr)
-                except ValueError:  # Handle hex decoding errors (corrupted data)
-                    print(f"- Error: Invalid hex data for case ID: {case_hex}", file=sys.stderr)
-                except Exception as e:  # Handle decryption errors
-                    print(f"- Error decrypting case ID: {e}", file=sys.stderr)
-            else:
-                print(f"- {case_hex}")  # Print the hex-encoded value if password is wrong
+            try:
+                enc_case_id_bytes = bytes.fromhex(case_hex)
+                decrypted_case_id = decrypt_field(enc_case_id_bytes, is_uuid=True)
+                if decrypted_case_id:
+                    print(f"- {decrypted_case_id}")
+                else:
+                    print(f"- Error decrypting case ID: {case_hex}", file=sys.stderr)
+            except Exception as e:
+                print(f"- Error decrypting case ID: {e}", file=sys.stderr)
     else:
         print("> No cases found in the blockchain.")
+
+
 
 
 def command_show_items():
@@ -537,10 +568,18 @@ def command_show_items():
     parser.add_argument("-p", "--password", required=True, help="Owner password")
     args = parser.parse_args(sys.argv[3:])
 
-    owner_password = os.getenv("BCHOC_PASSWORD_OWNER", "ownerpass")
-    if args.password != owner_password:
+    valid_passwords = [
+    os.getenv("BCHOC_PASSWORD_POLICE", "P80P"),
+    os.getenv("BCHOC_PASSWORD_ANALYST", "A65A"),
+    os.getenv("BCHOC_PASSWORD_EXECUTIVE", "E69E"),
+    os.getenv("BCHOC_PASSWORD_LAWYER", "L76L"),
+    ]
+
+    if args.password not in valid_passwords:
         print("> Invalid password", file=sys.stderr)
         sys.exit(1)
+
+
 
     file_path = os.getenv("BCHOC_FILE_PATH", "blockchain.dat")
     ensure_blockchain_initialized(file_path)
@@ -599,10 +638,17 @@ def command_checkout():
     parser.add_argument("-p", "--password", required=True, help="Police password")
     args = parser.parse_args(sys.argv[2:])
 
-    police_password = os.getenv("BCHOC_PASSWORD_POLICE", "P80P")
-    if args.password != police_password:
+    valid_passwords = [
+    os.getenv("BCHOC_PASSWORD_POLICE", "P80P"),
+    os.getenv("BCHOC_PASSWORD_ANALYST", "A65A"),
+    os.getenv("BCHOC_PASSWORD_EXECUTIVE", "E69E"),
+    os.getenv("BCHOC_PASSWORD_LAWYER", "L76L"),
+    ]
+
+    if args.password not in valid_passwords:
         print("> Invalid password", file=sys.stderr)
         sys.exit(1)
+
 
     file_path = os.getenv("BCHOC_FILE_PATH", "blockchain.dat")
     ensure_blockchain_initialized(file_path)
@@ -625,7 +671,7 @@ def command_checkout():
 
         # Check if the item is in CHECKEDIN state
         last_state = get_last_state(file_path, encrypted_item_id)
-        if last_state != b"CHECKEDIN\0\0\0":
+        if last_state !=pad_field (b"CHECKEDIN", 12):
             print(f"> Item {item_id} is not in CHECKEDIN state.", file=sys.stderr)
             sys.exit(1)
 
@@ -655,6 +701,12 @@ def command_checkout():
         sys.exit(1)
 
 
+
+
+
+
+
+
 def command_checkin():
     """
     Implements the 'checkin' command.
@@ -664,10 +716,17 @@ def command_checkin():
     parser.add_argument("-p", "--password", required=True, help="Analyst password")
     args = parser.parse_args(sys.argv[2:])
 
-    analyst_password = os.getenv("BCHOC_PASSWORD_ANALYST", "A65A")
-    if args.password != analyst_password:
+    valid_passwords = [
+    os.getenv("BCHOC_PASSWORD_POLICE", "P80P"),
+    os.getenv("BCHOC_PASSWORD_ANALYST", "A65A"),
+    os.getenv("BCHOC_PASSWORD_EXECUTIVE", "E69E"),
+    os.getenv("BCHOC_PASSWORD_LAWYER", "L76L"),
+    ]
+
+    if args.password not in valid_passwords:
         print("> Invalid password", file=sys.stderr)
         sys.exit(1)
+
 
     file_path = os.getenv("BCHOC_FILE_PATH", "blockchain.dat")
     ensure_blockchain_initialized(file_path)
@@ -871,6 +930,12 @@ def command_verify():
         sys.exit(1)
 
 
+
+
+
+
+
+
 def command_show_history():
     """
     Implements the 'show history' command.
@@ -883,10 +948,14 @@ def command_show_history():
     parser.add_argument("-p", "--password", required=True, help="Password")
     args = parser.parse_args(sys.argv[3:])
 
-    # Hardcoded owner password (default: "ownerpass")
-    owner_password = os.getenv("BCHOC_PASSWORD_OWNER", "ownerpass")
+    valid_passwords = [
+        os.getenv("BCHOC_PASSWORD_POLICE", "P80P"),
+        os.getenv("BCHOC_PASSWORD_ANALYST", "A65A"),
+        os.getenv("BCHOC_PASSWORD_EXECUTIVE", "E69E"),
+        os.getenv("BCHOC_PASSWORD_LAWYER", "L76L"),
+    ]
 
-    if args.password != owner_password:
+    if args.password not in valid_passwords:
         print("> Invalid password", file=sys.stderr)
         sys.exit(1)
 
@@ -903,23 +972,12 @@ def command_show_history():
             data = block[HEADER_SIZE:HEADER_SIZE + d_length].decode('ascii')
             timestamp_iso = datetime.datetime.fromtimestamp(timestamp, tz=datetime.timezone.utc).isoformat() + "Z"
 
-            decrypted_case_id = decrypt_field(enc_case_id, is_uuid=True)  # Decrypt as UUID
-            decrypted_item_id = decrypt_field(enc_item_id, is_uuid=False)  # Decrypt as an integer
-
-            # Ensure proper formatting
-            if isinstance(decrypted_case_id, int):
-                case_id_to_print = str(decrypted_case_id)  # Convert to string
-            else:
-                case_id_to_print = decrypted_case_id  # Use UUID as is
-
-            if isinstance(decrypted_item_id, int):
-                item_id_to_print = str(decrypted_item_id)  # Convert to string
-            else:
-                item_id_to_print = decrypted_item_id  # Use UUID as is
+            decrypted_case_id = decrypt_field(enc_case_id, is_uuid=True)
+            decrypted_item_id = decrypt_field(enc_item_id, is_uuid=False)
 
             entry = {
-                "case": case_id_to_print,
-                "item": item_id_to_print,
+                "case": decrypted_case_id,
+                "item": decrypted_item_id,
                 "action": state.decode('ascii').rstrip('\0'),
                 "time": timestamp_iso,
                 "data": data
@@ -930,19 +988,103 @@ def command_show_history():
         print(f"> Error: {e}", file=sys.stderr)
         sys.exit(1)
 
-    # Sorting & Limiting
-    if args.reverse:
-        entries.reverse()
-    if args.num_entries:
-        entries = entries[:args.num_entries]
+    # � Now apply filters properly
+    filtered_entries = []
 
-    # Print History
     for entry in entries:
+        case_match = True
+        item_match = True
+
+        if args.case:
+            case_match = (str(entry["case"]) == args.case)
+
+        if args.item:
+            item_match = (str(entry["item"]) == args.item)
+
+        if case_match and item_match:
+            filtered_entries.append(entry)
+
+    # Reverse if needed
+    if args.reverse:
+        filtered_entries.reverse()
+
+    # Limit number of entries if needed
+    if args.num_entries:
+        filtered_entries = filtered_entries[:args.num_entries]
+
+    # Print filtered entries
+    for entry in filtered_entries:
         print(f"> Case: {entry['case']}")
         print(f"> Item: {entry['item']}")
         print(f"> Action: {entry['action']}")
         print(f"> Time: {entry['time']}")
         print(f"> Data: {entry['data']}\n")
+
+
+
+
+
+
+
+
+
+
+
+
+# Summary Command
+
+def command_summary():
+    """
+    Implements the 'summary' command.
+    """
+    parser = argparse.ArgumentParser(description="Summary for a given case")
+    parser.add_argument("-c", "--case", required=True, help="Case ID")
+    args = parser.parse_args(sys.argv[2:])
+
+    file_path = os.getenv("BCHOC_FILE_PATH", "blockchain.dat")
+    ensure_blockchain_initialized(file_path)
+
+    try:
+        encrypted_case_id = encrypt_case_id(args.case)
+    except Exception:
+        print("> Invalid case ID format", file=sys.stderr)
+        sys.exit(1)
+
+    item_states = {}
+
+    try:
+        for block in iter_blocks(file_path):
+            header = block[:HEADER_SIZE]
+            unpacked = struct.unpack(BLOCK_FORMAT, header)
+            prev_hash, timestamp, enc_case_id, enc_item_id, state, creator, owner, d_length = unpacked
+
+            if enc_case_id == encrypted_case_id:
+                item_states[enc_item_id] = state.strip(b"\0").decode('ascii')  # Remove \0 padding and decode
+
+        if not item_states:
+            print(f"> No items found for case {args.case}")
+            sys.exit(0)
+
+        # Count items by state
+        total_items = len(item_states)
+        count_checkedin = list(item_states.values()).count("CHECKEDIN")
+        count_checkedout = list(item_states.values()).count("CHECKEDOUT")
+        count_disposed = list(item_states.values()).count("DISPOSED")
+        count_destroyed = list(item_states.values()).count("DESTROYED")
+        count_released = list(item_states.values()).count("RELEASED")
+
+        # Output results
+        print(f"> Number of unique items: {total_items}")
+        print(f"> Number of CHECKEDIN items: {count_checkedin}")
+        print(f"> Number of CHECKEDOUT items: {count_checkedout}")
+        print(f"> Number of DISPOSED items: {count_disposed}")
+        print(f"> Number of DESTROYED items: {count_destroyed}")
+        print(f"> Number of RELEASED items: {count_released}")
+
+    except Exception as e:
+        print(f"> Error processing blockchain file: {e}", file=sys.stderr)
+        sys.exit(1)
+
 
 # --------------------------------------------------------------------
 # Main Dispatch
@@ -956,6 +1098,9 @@ def main():
     command = sys.argv[1].lower()
 
     if command == "init":
+        if len(sys.argv) != 2:
+            print("Usage: ./bchoc init", file=sys.stderr)
+            sys.exit(1)
         command_init()
     elif command == "add":
         command_add()
@@ -982,10 +1127,13 @@ def main():
         command_remove()
     elif command == "verify":
         command_verify()
+
+    elif command == "summary":
+        command_summary()
+
     else:
         print("Unknown command:", command, file=sys.stderr)
         sys.exit(1)
 
 if __name__ == "__main__":
     main()
-
