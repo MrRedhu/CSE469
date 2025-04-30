@@ -675,6 +675,14 @@ def command_checkin():
     print("> Status: CHECKEDIN")
     print(f"> Time of action: {ts_iso}")
 
+def last_owner(file_path, enc_item_id):
+    owner = b"\0"*12
+    for blk in iter_blocks(file_path):
+        hdr = blk[:HEADER_SIZE]
+        _, _, _, iid, _, _, own, _ = struct.unpack(BLOCK_FORMAT, hdr)
+        if iid == enc_item_id:
+            owner = own
+    return owner
 
 def command_remove():
     """
@@ -721,8 +729,7 @@ def command_remove():
             sys.exit(1)
 
         # Get previous block hash
-        last_block = get_last_block(file_path)
-        prev_hash = compute_hash(last_block) if last_block else b"\0" * 32
+        prev_hash = b"\0" * 32 
 
         # Use actual state string (e.g. DESTROYED) padded to 12 bytes
         state = pad_field(args.why.encode("ascii"), 12)
@@ -732,23 +739,23 @@ def command_remove():
 
         # Use role name from creator password as owner
         # For removal, it’s the most recent valid role, often the *last* check-in person
-        owner_role = b'\0' * 12  # default in case nothing matches
-
-        # Infer role from creator's password — must match the role actually doing the removal
-        for pwd, role in ROLE_NAME.items():
-            if pwd == args.password:
-                owner_role = pad_field(role.encode('ascii'), 12)
-                break
+        if args.why == "RELEASED" and args.owner:
+            owner_field = pad_field(args.owner, 12)
+        else:
+            owner_field = last_owner(file_path, encrypted_item_id)
 
         # Construct header — NO data field, d_length = 0
         timestamp = datetime.datetime.now(datetime.timezone.utc).timestamp()
         d_length = 0
         data_bytes = b""
 
-        header = struct.pack(BLOCK_FORMAT,
-                             prev_hash, timestamp,
-                             encrypted_case_id, encrypted_item_id,
-                             state, creator, owner_role, d_length)
+        header = struct.pack(
+            BLOCK_FORMAT,
+            prev_hash, timestamp,
+            encrypted_case_id, encrypted_item_id,
+            state, creator, owner_field, 0
+        )
+
 
         with open(file_path, "ab") as f:
             f.write(header + data_bytes)
