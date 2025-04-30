@@ -47,17 +47,21 @@ AES_KEY = b"R0chLi4uLi4uLi4="  # Provided key (make sure PyCryptodome is install
 # --------------------------------------------------------------------
 # Common Functions (used by both commands)
 # --------------------------------------------------------------------
+CREATOR_PWD = os.getenv("BCHOC_PASSWORD_CREATOR", "C67C")
 ROLE_NAME = {               # pwd  → owner string in block
     os.getenv("BCHOC_PASSWORD_POLICE",     "P80P"): "POLICE",
     os.getenv("BCHOC_PASSWORD_ANALYST",    "A65A"): "ANALYST",
     os.getenv("BCHOC_PASSWORD_EXECUTIVE",  "E69E"): "EXECUTIVE",
     os.getenv("BCHOC_PASSWORD_LAWYER",     "L76L"): "LAWYER",
+    CREATOR_PWD:                          "CREATOR", 
 }
 
 def create_genesis_block() -> bytes:
     """Return the byte sequence for the INITIAL (genesis) block."""
     prev_hash   = b"0" * 32                 # 32 ASCII '0' bytes
-    timestamp   = 0.0                       # double +0.0
+    timestamp   = datetime.datetime.now(
+                     datetime.timezone.utc
+                 ).timestamp()                   # double +0.0
     case_id     = b"0" * 32
     evidence_id = b"0" * 32
     state       = b"INITIAL" + b"\0" * 5    # pad to 12 bytes
@@ -891,7 +895,10 @@ def command_show_history():
         hdr = blk[:HEADER_SIZE]
         _, ts, enc_case, enc_item, state, _, _, dlen = struct.unpack(BLOCK_FORMAT, hdr)
         data = blk[HEADER_SIZE:HEADER_SIZE + dlen].decode('ascii').strip('\0')
-        t_iso = datetime.datetime.fromtimestamp(ts, tz=datetime.timezone.utc).isoformat()
+        t_iso = datetime.datetime.fromtimestamp(
+            ts, tz=datetime.timezone.utc
+        ).isoformat(timespec="microseconds")
+
 
         # Genesis special case
         if state.strip(b"\0") == b"INITIAL":
@@ -944,58 +951,52 @@ def command_show_history():
 
 
 # Summary Command
-
 def command_summary():
-    """
-    Implements the 'summary' command.
-    """
-    parser = argparse.ArgumentParser(description="Summary for a given case")
-    parser.add_argument("-c", "--case", required=True, help="Case ID")
-    args = parser.parse_args(sys.argv[2:])
+    p = argparse.ArgumentParser(description="Summary for a given case")
+    p.add_argument("-c", "--case", required=True)
+    args = p.parse_args(sys.argv[2:])
 
     file_path = os.getenv("BCHOC_FILE_PATH", "blockchain.dat")
     ensure_blockchain_initialized(file_path)
 
     try:
-        encrypted_case_id = encrypt_case_id(args.case)
+        enc_case = encrypt_case_id(args.case)
     except Exception:
         print("> Invalid case ID format", file=sys.stderr)
         sys.exit(1)
 
-    item_states = {}
+    # ── counters ───────────────────────────────────────────────
+    unique_items         = set()
+    cnt_in = cnt_out = cnt_disp = cnt_dest = cnt_rel = 0
 
-    try:
-        for block in iter_blocks(file_path):
-            header = block[:HEADER_SIZE]
-            unpacked = struct.unpack(BLOCK_FORMAT, header)
-            prev_hash, timestamp, enc_case_id, enc_item_id, state, creator, owner, d_length = unpacked
+    for blk in iter_blocks(file_path):
+        hdr = blk[:HEADER_SIZE]
+        _, _, c_enc, i_enc, state_b, *_ = struct.unpack(BLOCK_FORMAT, hdr)
 
-            if enc_case_id == encrypted_case_id:
-                item_states[enc_item_id] = state.strip(b"\0").decode('ascii')  # Remove \0 padding and decode
+        if c_enc != enc_case:
+            continue                                    # wrong case – skip
 
-        if not item_states:
-            sys.exit(0)
+        state = state_b.rstrip(b"\0").decode("ascii")
+        unique_items.add(i_enc)
 
-        # Count items by state
-        total_items = len(item_states)
-        count_checkedin = list(item_states.values()).count("CHECKEDIN")
-        count_checkedout = list(item_states.values()).count("CHECKEDOUT")
-        count_disposed = list(item_states.values()).count("DISPOSED")
-        count_destroyed = list(item_states.values()).count("DESTROYED")
-        count_released = list(item_states.values()).count("RELEASED")
+        if   state == "CHECKEDIN":  cnt_in   += 1
+        elif state == "CHECKEDOUT": cnt_out  += 1
+        elif state == "DISPOSED":   cnt_disp += 1
+        elif state == "DESTROYED":  cnt_dest += 1
+        elif state == "RELEASED":   cnt_rel  += 1
 
-        # Output results
-        print(f"> Case: {args.case}")
-        print(f"> Number of unique items: {total_items}")
-        print(f"> Number of CHECKEDIN items: {count_checkedin}")
-        print(f"> Number of CHECKEDOUT items: {count_checkedout}")
-        print(f"> Number of DISPOSED items: {count_disposed}")
-        print(f"> Number of DESTROYED items: {count_destroyed}")
-        print(f"> Number of RELEASED items: {count_released}")
+    total = len(unique_items)
 
-    except Exception as e:
-        print(f"> Error processing blockchain file: {e}", file=sys.stderr)
-        sys.exit(1)
+    # ── exact output ───────────────────────────────────────────
+    print(f"Case Summary for Case ID: {args.case}")
+    print(f"Total Evidence Items: {total}")
+    print(f"Checked In: {cnt_in}")
+    print(f"Checked Out: {cnt_out}")
+    print(f"Disposed: {cnt_disp}")
+    print(f"Destroyed: {cnt_dest}")
+    print(f"Released: {cnt_rel}")
+
+    sys.exit(0)
 
 
 # --------------------------------------------------------------------
