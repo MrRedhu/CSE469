@@ -47,6 +47,12 @@ AES_KEY = b"R0chLi4uLi4uLi4="  # Provided key (make sure PyCryptodome is install
 # --------------------------------------------------------------------
 # Common Functions (used by both commands)
 # --------------------------------------------------------------------
+ROLE_NAME = {               # pwd  → owner string in block
+    os.getenv("BCHOC_PASSWORD_POLICE",     "P80P"): "POLICE",
+    os.getenv("BCHOC_PASSWORD_ANALYST",    "A65A"): "ANALYST",
+    os.getenv("BCHOC_PASSWORD_EXECUTIVE",  "E69E"): "EXECUTIVE",
+    os.getenv("BCHOC_PASSWORD_LAWYER",     "L76L"): "LAWYER",
+}
 
 def create_genesis_block() -> bytes:
     """Return the byte sequence for the INITIAL (genesis) block."""
@@ -599,81 +605,68 @@ def command_show_items():
 # --------------------------------------------------------------------
 # Command Implementations checkin and checkout
 # --------------------------------------------------------------------
+def original_creator(file_path, enc_item_id):
+    """Return the creator field from the FIRST block for this item."""
+    for block in iter_blocks(file_path):
+        hdr = block[:HEADER_SIZE]
+        _, _, _, iid, _, creator, _, _ = struct.unpack(BLOCK_FORMAT, hdr)
+        if iid == enc_item_id:
+            return creator
+    return b"\x00"*12            # fallback (should not happen)
 
+def _prev_hash_from_last_block(file_path: str) -> bytes:
+    """Return 32 × 0 if the last block is the genesis, else SHA-256(last_block)."""
+    last_block = get_last_block(file_path)
+    if last_block is None:                     # should never happen (init created)
+        return b"\0" * 32
+    last_state = struct.unpack(BLOCK_FORMAT, last_block[:HEADER_SIZE])[4]
+    return b"\0" * 32 if last_state.startswith(b"INITIAL") else compute_hash(last_block)
 
 
 def command_checkout():
-    """
-    Implements the 'checkout' command.
-    """
     parser = argparse.ArgumentParser(description="Checkout an evidence item")
     parser.add_argument("-i", "--item", required=True, help="Evidence item ID")
-    parser.add_argument("-p", "--password", required=True, help="Police password")
+    parser.add_argument("-p", "--password", required=True, help="Owner password")
     args = parser.parse_args(sys.argv[2:])
 
-    valid_passwords = [
-    os.getenv("BCHOC_PASSWORD_POLICE", "P80P"),
-    os.getenv("BCHOC_PASSWORD_ANALYST", "A65A"),
-    os.getenv("BCHOC_PASSWORD_EXECUTIVE", "E69E"),
-    os.getenv("BCHOC_PASSWORD_LAWYER", "L76L"),
-    ]
-
-    if args.password not in valid_passwords:
+    role_txt = ROLE_NAME.get(args.password)
+    if role_txt is None:
         print("> Invalid password", file=sys.stderr)
         sys.exit(1)
-
 
     file_path = os.getenv("BCHOC_FILE_PATH", "blockchain.dat")
     ensure_blockchain_initialized(file_path)
 
-    try:
-        last_block = get_last_block(file_path)
-        if not last_block:
-            print("> Blockchain file is empty.", file=sys.stderr)
-            sys.exit(1)
-        prev_hash = compute_hash(last_block)
-
-        item_id = args.item
-        encrypted_item_id = encrypt_item_id(item_id)
-
-        # Get case ID
-        encrypted_case_id = get_encrypted_case_id_from_item(file_path, encrypted_item_id)
-        if not encrypted_case_id:
-            print(f"> Item {item_id} not found in blockchain.", file=sys.stderr)
-            sys.exit(1)
-
-        # Check if the item is in CHECKEDIN state
-        last_state = get_last_state(file_path, encrypted_item_id)
-        if last_state !=pad_field (b"CHECKEDIN", 12):
-            print(f"> Item {item_id} is not in CHECKEDIN state.", file=sys.stderr)
-            sys.exit(1)
-
-        timestamp = datetime.datetime.now(datetime.timezone.utc).timestamp()
-        state = pad_field(b"CHECKEDOUT", 12)
-        creator = b"\0" * 12
-        owner = b"\0" * 12
-        data_str = f"Checked out item: {item_id}\0"
-        data_bytes = data_str.encode('ascii')
-        d_length = len(data_bytes)
-
-        block_data = struct.pack(BLOCK_FORMAT, prev_hash, timestamp, encrypted_case_id, encrypted_item_id, state, creator, owner, d_length) + data_bytes
-
-        with open(file_path, "ab") as f:
-            f.write(block_data)
-            f.flush()
-
-        timestamp_iso = datetime.datetime.fromtimestamp(timestamp, tz=datetime.timezone.utc).isoformat() + "Z"
-        decrypted_case_id = decrypt_field(encrypted_case_id, is_uuid=True)
-        print(f"> Case: {decrypted_case_id}")
-        print(f"> Checked out item: {item_id}")
-        print(f"> Status: CHECKEDOUT")
-        print(f"> Time of action: {timestamp_iso}")
-
-    except Exception as e:
-        print(f"> Error: {e}", file=sys.stderr)
+    enc_item_id = encrypt_item_id(args.item)
+    enc_case_id = get_encrypted_case_id_from_item(file_path, enc_item_id)
+    if not enc_case_id:
+        print(f"> Item {args.item} not found in blockchain.", file=sys.stderr)
         sys.exit(1)
 
+    if get_last_state(file_path, enc_item_id) != pad_field(b"CHECKEDIN", 12):
+        print(f"> Item {args.item} is not in CHECKEDIN state.", file=sys.stderr)
+        sys.exit(1)
 
+    prev_hash = b"\0" * 32
+    timestamp = datetime.datetime.now(datetime.timezone.utc).timestamp()
+    state     = pad_field(b"CHECKEDOUT", 12)
+    creator   = original_creator(file_path, enc_item_id)
+    owner     = pad_field(role_txt, 12)
+    d_length  = 0
+
+    header = struct.pack(
+        BLOCK_FORMAT, prev_hash, timestamp,
+        enc_case_id, enc_item_id,
+        state, creator, owner, d_length
+    )
+
+    with open(file_path, "ab") as f:
+        f.write(header)          # no data section
+
+    print(f"> Case: {decrypt_field(enc_case_id, True)}")
+    print(f"> Checked out item: {args.item}")
+    print("> Status: CHECKEDOUT")
+    print(f"> Time of action: {datetime.datetime.fromtimestamp(timestamp, tz=datetime.timezone.utc).isoformat()}Z")
 
 
 
@@ -681,76 +674,48 @@ def command_checkout():
 
 
 def command_checkin():
-    """
-    Implements the 'checkin' command.
-    """
-    parser = argparse.ArgumentParser(description="Check-in an evidence item")
-    parser.add_argument("-i", "--item", required=True, help="Evidence item ID")
-    parser.add_argument("-p", "--password", required=True, help="Analyst password")
-    args = parser.parse_args(sys.argv[2:])
+    p = argparse.ArgumentParser(description="Check-in an evidence item")
+    p.add_argument("-i", "--item", required=True)
+    p.add_argument("-p", "--password", required=True)
+    args = p.parse_args(sys.argv[2:])
 
-    valid_passwords = [
-    os.getenv("BCHOC_PASSWORD_POLICE", "P80P"),
-    os.getenv("BCHOC_PASSWORD_ANALYST", "A65A"),
-    os.getenv("BCHOC_PASSWORD_EXECUTIVE", "E69E"),
-    os.getenv("BCHOC_PASSWORD_LAWYER", "L76L"),
-    ]
-
-    if args.password not in valid_passwords:
+    role_txt = ROLE_NAME.get(args.password)          # ← keep role
+    if role_txt is None:
         print("> Invalid password", file=sys.stderr)
         sys.exit(1)
-
 
     file_path = os.getenv("BCHOC_FILE_PATH", "blockchain.dat")
     ensure_blockchain_initialized(file_path)
 
-    try:
-        last_block = get_last_block(file_path)
-        if not last_block:
-            print("> Blockchain file is empty.", file=sys.stderr)
-            sys.exit(1)
-        prev_hash = compute_hash(last_block)
-
-        item_id = args.item
-        encrypted_item_id = encrypt_item_id(item_id)
-
-        # Get case ID
-        encrypted_case_id = get_encrypted_case_id_from_item(file_path, encrypted_item_id)
-        if not encrypted_case_id:
-            print(f"> Item {item_id} not found in blockchain.", file=sys.stderr)
-            sys.exit(1)
-
-        # Check if the item is in CHECKEDOUT state
-        last_state = get_last_state(file_path, encrypted_item_id)
-        print(f"> Last state of item {item_id}: {last_state}")  # Debug print
-        if last_state != pad_field(b"CHECKEDOUT", 12):  # Use pad_field for consistent comparison
-            print(f"> Item {item_id} is not in CHECKEDOUT state.", file=sys.stderr)
-            sys.exit(1)
-
-        timestamp = datetime.datetime.now(datetime.timezone.utc).timestamp()
-        state = pad_field(b"CHECKEDIN", 12)
-        creator = b"\0" * 12
-        owner = b"\0" * 12
-        data_str = f"Checked in item: {item_id}\0"
-        data_bytes = data_str.encode('ascii')
-        d_length = len(data_bytes)
-
-        block_data = struct.pack(BLOCK_FORMAT, prev_hash, timestamp, encrypted_case_id, encrypted_item_id, state, creator, owner, d_length) + data_bytes
-
-        with open(file_path, "ab") as f:
-            f.write(block_data)
-            f.flush()
-
-        timestamp_iso = datetime.datetime.fromtimestamp(timestamp, tz=datetime.timezone.utc).isoformat() + "Z"
-        decrypted_case_id = decrypt_field(encrypted_case_id, is_uuid=True)
-        print(f"> Case: {decrypted_case_id}")
-        print(f"> Checked in item: {item_id}")
-        print(f"> Status: CHECKEDIN")
-        print(f"> Time of action: {timestamp_iso}")
-
-    except Exception as e:
-        print(f"> Error: {e}", file=sys.stderr)
+    enc_item_id = encrypt_item_id(args.item)
+    enc_case_id = get_encrypted_case_id_from_item(file_path, enc_item_id)
+    if not enc_case_id:
+        print(f"> Item {args.item} not found in blockchain.", file=sys.stderr)
         sys.exit(1)
+
+    if get_last_state(file_path, enc_item_id) != pad_field(b"CHECKEDOUT", 12):
+        print(f"> Item {args.item} is not in CHECKEDOUT state.", file=sys.stderr)
+        sys.exit(1)
+
+    prev_hash = b"\0" * 32                           # rule: always zero
+    timestamp = datetime.datetime.now(datetime.timezone.utc).timestamp()
+    state     = b"CHECKEDIN\x00\x00"                 # **exactly two NULs**
+    creator   = original_creator(file_path, enc_item_id)
+    owner     = pad_field(role_txt, 12)              # role as owner
+    d_length  = 0
+
+    header = struct.pack(BLOCK_FORMAT, prev_hash, timestamp,
+                         enc_case_id, enc_item_id,
+                         state, creator, owner, d_length)
+
+    with open(file_path, "ab") as f:
+        f.write(header)                              # no data section
+
+    ts_iso = datetime.datetime.fromtimestamp(timestamp, tz=datetime.timezone.utc).isoformat()+"Z"
+    print(f"> Case: {decrypt_field(enc_case_id, True)}")
+    print(f"> Checked in item: {args.item}")
+    print("> Status: CHECKEDIN")
+    print(f"> Time of action: {ts_iso}")
 
 
 def command_remove():
