@@ -241,19 +241,30 @@ def encrypt_case_id(case_id_str):
     return encrypt_field(uuid_obj.bytes)
 
 
-def encrypt_item_id(item_id_str):
+def encrypt_item_id(item_id_str: str) -> bytes:
     """
-    Encrypts an evidence (item) id.
-    The item id (a 4-byte integer) is packed in big-endian order, padded to 16 bytes, then encrypted.
+    Encrypt a 4-byte evidence-item integer.
+
+    • Pack the integer BIG-endian (">I") to 4 bytes  
+    • Left-pad with 12 NUL bytes so the int is at the *end* of the 16-byte block  
+    • Encrypt the 16-byte block with AES-ECB  
+    • Return the 32-byte hex-encoded ciphertext (ASCII bytes)
     """
     try:
-        item_int = int(item_id_str)  # Ensure the input is an integer
-        packed = struct.pack(">I", item_int)  # Pack as 4-byte big-endian integer
-        padded = packed + (b'\0' * 12)  # Pad to 16 bytes
-        return encrypt_field(padded)  # Encrypt and return hex-encoded ciphertext
+        item_int = int(item_id_str)           # ensure it is an int
+        if not (0 <= item_int <= 0xFFFFFFFF):
+            raise ValueError
     except ValueError:
         print("> Invalid item id", file=sys.stderr)
         sys.exit(1)
+
+    int_bytes = struct.pack(">I", item_int)   # big-endian 4-byte integer
+    padded    = b'\x00' * 12 + int_bytes      # 16-byte block (12 × 00 then int)
+    cipher    = AES.new(AES_KEY, AES.MODE_ECB)
+    ciphertext = cipher.encrypt(padded)
+
+    return ciphertext.hex().encode("ascii")   # 32 ASCII hex chars (32 bytes)
+
 
 def decrypt_field(ciphertext_hex, is_uuid=False):
     """
@@ -404,12 +415,15 @@ def command_add():
             print("> Blockchain file is empty.", file=sys.stderr)
             f.close()
             sys.exit(1)
-        prev_hash = compute_hash(last_block)
+        last_header = last_block[:HEADER_SIZE]
+        last_state  = struct.unpack(BLOCK_FORMAT, last_header)[4]
+        prev_hash   = b"\0" * 32 if last_state.startswith(b"INITIAL") \
+                                else compute_hash(last_block)
 
         # Use the current UTC timestamp
         timestamp = datetime.datetime.now(datetime.timezone.utc).timestamp()
 
-        state = b"CHECKEDIN" + b"\0" * (12 - len(b"CHECKEDIN"))
+        state = b"CHECKEDIN" + b"\0"
 
         # Prepare the creator field (padded to 12 bytes)
         creator_bytes = pad_field(args.creator.encode('ascii'), 12)
@@ -418,23 +432,19 @@ def command_add():
         owner = b"\0" * 12
 
         data_str = f"Added item: {item}\0"
-        data_bytes = data_str.encode('ascii')
-        d_length = len(data_bytes)
+        data_bytes = b""
+        d_length = 0
 
 
         # Pack the header
-        header = struct.pack(BLOCK_FORMAT,
-                             prev_hash,
-                             timestamp,
-                             encrypted_case_id,
-                             encrypted_item_id,
-                             state,
-                             creator_bytes,
-                             owner,
-                             d_length)
-
-        # Concatenate header and data to form the complete block
-        block = header + data_bytes
+        header = struct.pack(
+            BLOCK_FORMAT,
+            prev_hash, timestamp,
+            encrypted_case_id, encrypted_item_id,
+            state, creator_bytes, owner,
+            d_length
+        )
+        block = header + data_bytes            # data_bytes is empty
 
         # Append the block to the blockchain file
         try:
