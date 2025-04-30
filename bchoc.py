@@ -242,7 +242,6 @@ def encrypt_case_id(case_id_str):
     try:
         uuid_obj = uuid.UUID(case_id_str)
     except ValueError:
-        print("> Invalid case id", file=sys.stderr)
         sys.exit(1)
     return encrypt_field(uuid_obj.bytes)
 
@@ -677,22 +676,18 @@ def command_checkin():
     print(f"> Time of action: {ts_iso}")
 
 
-
 def command_remove():
     """
     Implements the 'remove' command.
     """
     parser = argparse.ArgumentParser(description="Remove an evidence item")
     parser.add_argument("-i", "--item", required=True, help="Evidence item ID")
-    parser.add_argument("-y", "--why", required=True,
-                        choices=["DISPOSED", "DESTROYED", "RELEASED"],
-                        help="Reason for removal")
-    parser.add_argument("-o", "--owner",
-                        help="New owner (required if --why RELEASED)")
+    parser.add_argument("-y", "--why", required=True, choices=["DISPOSED", "DESTROYED", "RELEASED"], help="Reason for removal")
+    parser.add_argument("-o", "--owner", help="New owner (if RELEASED)")  # still needed to avoid parser error
     parser.add_argument("-p", "--password", required=True, help="Creator password")
     args = parser.parse_args(sys.argv[2:])
 
-    # Validate remover’s password
+    # Validate password
     creator_password = os.getenv("BCHOC_PASSWORD_CREATOR", "C67C")
     if args.password != creator_password:
         print("> Invalid password", file=sys.stderr)
@@ -701,69 +696,74 @@ def command_remove():
     file_path = os.getenv("BCHOC_FILE_PATH", "blockchain.dat")
     ensure_blockchain_initialized(file_path)
 
-    # Encrypt the item ID
-    item_id = int(args.item)
-    encrypted_item_id = encrypt_item_id(str(item_id))
+    try:
+        # Encrypt item ID
+        item_id = int(args.item)
+        encrypted_item_id = encrypt_item_id(str(item_id))
 
-    # Verify item exists and is currently CHECKEDIN
-    last_state = get_last_state(file_path, encrypted_item_id)
-    if last_state is None:
-        print(f"> Item {args.item} not found in blockchain.", file=sys.stderr)
-        sys.exit(1)
-    if last_state.startswith(b"REMOVED"):
-        print(f"> Error: Item {args.item} has already been removed.", file=sys.stderr)
-        sys.exit(1)
-    if last_state != pad_field(b"CHECKEDIN", 12):
-        print(f"> Error: Item {args.item} is not in CHECKEDIN state.", file=sys.stderr)
-        sys.exit(1)
-
-    encrypted_case_id = get_encrypted_case_id_from_item(file_path, encrypted_item_id)
-    if not encrypted_case_id:
-        print("> Error: Case ID not found for this item.", file=sys.stderr)
-        sys.exit(1)
-
-    # Prepare the new block
-    last_block = get_last_block(file_path)
-    prev_hash = compute_hash(last_block) if last_block else b"\0" * 32
-    state = pad_field(args.why.encode("ascii"), 12)
-    creator = original_creator(file_path, encrypted_item_id)
-    timestamp = datetime.datetime.now(datetime.timezone.utc).timestamp()
-    d_length = 0
-    data_bytes = b""
-
-    # Determine the owner field
-    if args.why == "RELEASED":
-        if not args.owner:
-            print("> Error: --owner is required when --why RELEASED", file=sys.stderr)
+        # Get current state and case ID
+        last_state = get_last_state(file_path, encrypted_item_id)
+        if last_state is None:
+            print(f"> Item {args.item} not found in blockchain.", file=sys.stderr)
             sys.exit(1)
-        owner_field = pad_field(args.owner.encode("ascii"), 12)
-    else:
-        # Preserve the last owner from the previous block
-        owner_field = last_block.owner if last_block else pad_field(b"", 12)
 
-    # Pack and append
-    header = struct.pack(
-        BLOCK_FORMAT,
-        prev_hash,
-        timestamp,
-        encrypted_case_id,
-        encrypted_item_id,
-        state,
-        creator,
-        owner_field,
-        d_length
-    )
-    with open(file_path, "ab") as f:
-        f.write(header + data_bytes)
+        if last_state.startswith(b"REMOVED"):
+            print(f"> Error: Item {args.item} has already been removed.", file=sys.stderr)
+            sys.exit(1)
 
-    # Print output echoing the removal reason
-    ts = datetime.datetime.fromtimestamp(timestamp, tz=datetime.timezone.utc).isoformat() + "Z"
-    print(f"> Case: {decrypt_field(encrypted_case_id, is_uuid=True)}")
-    print(f"> Removed item: {args.item}")
-    print(f"> Reason: {args.why}")
-    print(f"> Status: {args.why}")
-    print(f"> Time of action: {ts}")
+        if last_state != pad_field(b"CHECKEDIN", 12):
+            print(f"> Error: Item {args.item} is not in CHECKEDIN state.", file=sys.stderr)
+            sys.exit(1)
 
+        encrypted_case_id = get_encrypted_case_id_from_item(file_path, encrypted_item_id)
+        if not encrypted_case_id:
+            print("> Error: Case ID not found for this item.", file=sys.stderr)
+            sys.exit(1)
+
+        # Get previous block hash
+        last_block = get_last_block(file_path)
+        prev_hash = compute_hash(last_block) if last_block else b"\0" * 32
+
+        # Use actual state string (e.g. DESTROYED) padded to 12 bytes
+        state = pad_field(args.why.encode("ascii"), 12)
+
+        # Get original creator of this item
+        creator = original_creator(file_path, encrypted_item_id)
+
+        # Use role name from creator password as owner
+        # For removal, it’s the most recent valid role, often the *last* check-in person
+        owner_role = b'\0' * 12  # default in case nothing matches
+
+        # Infer role from creator's password — must match the role actually doing the removal
+        for pwd, role in ROLE_NAME.items():
+            if pwd == args.password:
+                owner_role = pad_field(role.encode('ascii'), 12)
+                break
+
+        # Construct header — NO data field, d_length = 0
+        timestamp = datetime.datetime.now(datetime.timezone.utc).timestamp()
+        d_length = 0
+        data_bytes = b""
+
+        header = struct.pack(BLOCK_FORMAT,
+                             prev_hash, timestamp,
+                             encrypted_case_id, encrypted_item_id,
+                             state, creator, owner_role, d_length)
+
+        with open(file_path, "ab") as f:
+            f.write(header + data_bytes)
+
+        # Print required output
+        ts = datetime.datetime.fromtimestamp(timestamp, tz=datetime.timezone.utc).isoformat() + "Z"
+        print(f"> Case: {decrypt_field(encrypted_case_id, is_uuid=True)}")
+        print(f"> Removed item: {args.item}")
+        print(f"> Reason: {args.why}")
+        print(f"> Status: REMOVED")
+        print(f"> Time of action: {ts}")
+
+    except Exception as e:
+        print(f"> Error: {e}", file=sys.stderr)
+        sys.exit(1)
 
 
 
@@ -938,48 +938,57 @@ def command_show_history():
 
 # Summary Command
 
-
 def command_summary():
-    parser = argparse.ArgumentParser(description="Print summary for a case")
+    """
+    Implements the 'summary' command.
+    """
+    parser = argparse.ArgumentParser(description="Summary for a given case")
     parser.add_argument("-c", "--case", required=True, help="Case ID")
     args = parser.parse_args(sys.argv[2:])
 
     file_path = os.getenv("BCHOC_FILE_PATH", "blockchain.dat")
     ensure_blockchain_initialized(file_path)
 
-    # Gather the last state of each item for this case
-    final_state = {}
-    for block in iter_blocks(file_path):
-        header = block[:HEADER_SIZE]
-        _, _, case_enc, item_enc, state_field, *_ = struct.unpack(BLOCK_FORMAT, header)
-        state_str = state_field.rstrip(b"\x00").decode("ascii")
-        if state_str == "INITIAL":
-            continue
-        cid = decrypt_field(case_enc, is_uuid=True)
-        if cid != args.case:
-            continue
-        iid = decrypt_field(item_enc, is_uuid=False)
-        final_state[iid] = state_str
+    try:
+        encrypted_case_id = encrypt_case_id(args.case)
+    except Exception:
+        print("> Invalid case ID format", file=sys.stderr)
+        sys.exit(1)
 
-    # Tally counts
-    counts = {s: 0 for s in ["CHECKEDIN", "CHECKEDOUT", "DISPOSED", "DESTROYED", "RELEASED"]}
-    for st in final_state.values():
-        counts[st] += 1
-    total = len(final_state)
+    item_states = {}
 
-    # Print exactly these seven lines
-    print(f"Case Summary for Case ID: {args.case}")
-    print(f"Total Evidence Items: {total}")
-    print(f"Checked In: {counts['CHECKEDIN']}")
-    print(f"Checked Out: {counts['CHECKEDOUT']}")
-    print(f"Disposed: {counts['DISPOSED']}")
-    print(f"Destroyed: {counts['DESTROYED']}")
-    print(f"Released: {counts['RELEASED']}")
-    sys.exit(0)
+    try:
+        for block in iter_blocks(file_path):
+            header = block[:HEADER_SIZE]
+            unpacked = struct.unpack(BLOCK_FORMAT, header)
+            prev_hash, timestamp, enc_case_id, enc_item_id, state, creator, owner, d_length = unpacked
 
+            if enc_case_id == encrypted_case_id:
+                item_states[enc_item_id] = state.strip(b"\0").decode('ascii')  # Remove \0 padding and decode
 
+        if not item_states:
+            sys.exit(0)
 
+        # Count items by state
+        total_items = len(item_states)
+        count_checkedin = list(item_states.values()).count("CHECKEDIN")
+        count_checkedout = list(item_states.values()).count("CHECKEDOUT")
+        count_disposed = list(item_states.values()).count("DISPOSED")
+        count_destroyed = list(item_states.values()).count("DESTROYED")
+        count_released = list(item_states.values()).count("RELEASED")
 
+        # Output results
+        print(f"> Case: {args.case}")
+        print(f"> Number of unique items: {total_items}")
+        print(f"> Number of CHECKEDIN items: {count_checkedin}")
+        print(f"> Number of CHECKEDOUT items: {count_checkedout}")
+        print(f"> Number of DISPOSED items: {count_disposed}")
+        print(f"> Number of DESTROYED items: {count_destroyed}")
+        print(f"> Number of RELEASED items: {count_released}")
+
+    except Exception as e:
+        print(f"> Error processing blockchain file: {e}", file=sys.stderr)
+        sys.exit(1)
 
 
 # --------------------------------------------------------------------
@@ -1026,7 +1035,6 @@ def main():
 
     elif command == "summary":
         command_summary()
-
 
     else:
         print("Unknown command:", command, file=sys.stderr)
