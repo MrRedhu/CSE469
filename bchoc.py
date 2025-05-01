@@ -210,7 +210,6 @@ def get_last_state(file_path, encrypted_item_id):
     return last_state
 
 
-
 def get_encrypted_case_id_from_item(file_path, encrypted_item_id):
     """
     Retrieves the encrypted case ID associated with an encrypted item ID.
@@ -330,9 +329,53 @@ def load_blocks_from_file(file_path):
         sys.exit(1)
     return blocks
 
+
+
+
 # --------------------------------------------------------------------
-# Command Implementations
+# Helper
 # --------------------------------------------------------------------
+
+
+def original_creator(file_path, enc_item_id):
+    """Return the creator field from the FIRST block for this item."""
+    for block in iter_blocks(file_path):
+        hdr = block[:HEADER_SIZE]
+        _, _, _, iid, _, creator, _, _ = struct.unpack(BLOCK_FORMAT, hdr)
+        if iid == enc_item_id:
+            return creator
+    return b"\x00"*12            # fallback (should not happen)
+
+
+
+
+def _prev_hash_from_last_block(file_path: str) -> bytes:
+    last_block = get_last_block(file_path)
+    if last_block is None:
+        return b"\0" * 32
+    last_state = struct.unpack(BLOCK_FORMAT, last_block[:HEADER_SIZE])[4]
+    return b"\0" * 32 if last_state.startswith(b"INITIAL") \
+                        else compute_hash(last_block)
+
+
+def last_owner(file_path, enc_item_id):
+    owner = b"\0"*12
+    for blk in iter_blocks(file_path):
+        hdr = blk[:HEADER_SIZE]
+        _, _, _, iid, _, _, own, _ = struct.unpack(BLOCK_FORMAT, hdr)
+        if iid == enc_item_id:
+            owner = own
+    return owner
+
+# --------------------------------------------------------------------
+# Command All Implementations  
+
+
+
+# --------------------------------------------------------------------
+# Command Implementations  init and add
+# --------------------------------------------------------------------
+# Command_init
 
 def command_init():
     file_path = os.getenv("BCHOC_FILE_PATH", "blockchain.dat")
@@ -477,8 +520,6 @@ def command_add():
 
 
 
-
-
 # --------------------------------------------------------------------
 # Command Implementations show cases and show items
 # --------------------------------------------------------------------
@@ -506,10 +547,6 @@ def command_show_cases():
         print(cid)
 
     sys.exit(0)
-
-
-
-
 
 
 def command_show_items():
@@ -551,30 +588,8 @@ def command_show_items():
 
 
 # --------------------------------------------------------------------
-# Command Implementations checkin and checkout
+# Command Implementations checkin, checkout, and remove
 # --------------------------------------------------------------------
-def original_creator(file_path, enc_item_id):
-    """Return the creator field from the FIRST block for this item."""
-    for block in iter_blocks(file_path):
-        hdr = block[:HEADER_SIZE]
-        _, _, _, iid, _, creator, _, _ = struct.unpack(BLOCK_FORMAT, hdr)
-        if iid == enc_item_id:
-            return creator
-    return b"\x00"*12            # fallback (should not happen)
-
-
-
-
-def _prev_hash_from_last_block(file_path: str) -> bytes:
-    last_block = get_last_block(file_path)
-    if last_block is None:
-        return b"\0" * 32
-    last_state = struct.unpack(BLOCK_FORMAT, last_block[:HEADER_SIZE])[4]
-    return b"\0" * 32 if last_state.startswith(b"INITIAL") \
-                        else compute_hash(last_block)
-
-
-
 
 def command_checkout():
     parser = argparse.ArgumentParser(description="Checkout an evidence item")
@@ -632,9 +647,6 @@ def command_checkout():
     print(f"> Time of action: {ts_iso}")
 
 
-
-
-
 def command_checkin():
     p = argparse.ArgumentParser(description="Check-in an evidence item")
     p.add_argument("-i", "--item", required=True)
@@ -679,14 +691,11 @@ def command_checkin():
     print("> Status: CHECKEDIN")
     print(f"> Time of action: {ts_iso}")
 
-def last_owner(file_path, enc_item_id):
-    owner = b"\0"*12
-    for blk in iter_blocks(file_path):
-        hdr = blk[:HEADER_SIZE]
-        _, _, _, iid, _, _, own, _ = struct.unpack(BLOCK_FORMAT, hdr)
-        if iid == enc_item_id:
-            owner = own
-    return owner
+
+
+# --------------------------------------------------------------------
+# Command Implementations remove
+# --------------------------------------------------------------------
 
 def command_remove():
     """
@@ -782,8 +791,6 @@ def command_remove():
 # Command Implementations verify and history
 # --------------------------------------------------------------------
 
-
-
 def command_verify():
     """
     Implements the 'verify' command.
@@ -855,9 +862,6 @@ def command_verify():
     print("> State of blockchain: CLEAN")
     print(f"> Transactions in blockchain: {block_count}")
     sys.exit(0)
-
-
-
 
 
 def command_show_history():
@@ -943,12 +947,9 @@ def command_show_history():
 
 
 
-
-
-
-
-
-
+# --------------------------------------------------------------------
+# Command Implementations Summary
+# --------------------------------------------------------------------
 
 # Summary Command
 def command_summary():
