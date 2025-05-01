@@ -3,10 +3,10 @@
 Team Number 19:
 Authors Team:
 
-Aryan
-Connor
-Raejae
-Sam
+Aryan Nolastname
+Connor Gallaspy
+Raejae Soiha
+Samuel Belskus
 
 
 # BCHOC - Blockchain Chain of Custody
