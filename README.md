@@ -1,29 +1,9 @@
-# BCHOC - Chain of Custody Ledger (Python CLI)
-
+# BCHOC - Blockchain Chain of Custody (Python CLI)
 A **blockchain-inspired, append-only** chain-of-custody ledger for tracking digital evidence events (add, check-in/out, removal) with **integrity verification** and **encrypted identifiers**.
 
-> Portfolio note: this project is built as an academic forensics/security system prototype, focused on correctness, tamper-evidence, and a clean CLI UX.
+## Overview
 
----
-
-## Highlights
-
-- **Append-only binary ledger** (tamper-evident record of evidence handling)
-- **Integrity verification** to detect mutation, reordering, or broken linkage
-- **Encryption of sensitive identifiers** using `pycryptodome`
-- **Unit tests** included (`python -m unittest`)
-- Clear CLI flows for common custody actions
-
----
-
-## How it works (high level)
-
-1. Each action (e.g., *ADD*, *CHECKOUT*, *CHECKIN*, *REMOVE*) becomes a new record appended to a single on-disk ledger.
-2. Records include metadata (timestamp, case/item IDs, state transitions, etc.).
-3. A verification routine walks the ledger to confirm consistency and integrity.
-
----
-
+BCHOC is a blockchain-inspired, append-only chain-of-custody ledger for tracking digital evidence events. Each action (add, checkin, checkout, remove) appends a binary record to a single ledger file, and integrity checks verify that the chain has not been altered.
 ## Architecture
 
 ```mermaid
@@ -34,9 +14,14 @@ flowchart LR
   CLI -->|show/history| OUT[Human-readable output]
 ```
 
-## Quick start
 
-### Requirements
+## How it works
+
+1. The ledger is a binary file where each block stores metadata, state, and a previous-hash link.
+2. Case IDs (UUIDs) and item IDs (4-byte integers) are encrypted with AES-ECB before storage.
+3. The `verify` command walks the ledger and validates hashes and state transitions.
+
+## Requirements
 
 - Python 3.x
 - `pycryptodome`
@@ -45,46 +30,26 @@ flowchart LR
 pip install pycryptodome
 ```
 
-### Run
+## Environment variables
+
+- `BCHOC_FILE_PATH` (optional): path to the binary ledger file.
+- `BCHOC_PASSWORD_POLICE` (default `P80P`)
+- `BCHOC_PASSWORD_ANALYST` (default `A65A`)
+- `BCHOC_PASSWORD_EXECUTIVE` (default `E69E`)
+- `BCHOC_PASSWORD_LAWYER` (default `L76L`)
+- `BCHOC_PASSWORD_CREATOR` (default `C67C`)
+
+## Commands
 
 ```sh
 python3 bchoc.py init
-python3 bchoc.py add -c <case_uuid> -i <item_id> -g <creator> -p <password>
+python3 bchoc.py add -c <case_uuid> -i <item_id> [-i <item_id> ...] -g <creator> -p <password>
 python3 bchoc.py checkout -i <item_id> -p <password>
 python3 bchoc.py checkin -i <item_id> -p <password>
-python3 bchoc.py show history -i <item_id> -p <password>
+python3 bchoc.py remove -i <item_id> -y <reason> [-o <owner>] -p <password>
+python3 bchoc.py show cases
+python3 bchoc.py show items -c <case_uuid>
+python3 bchoc.py show history [-c <case_uuid>] [-i <item_id>] [-n <num_entries>] [-r] -p <password>
+python3 bchoc.py summary -c <case_uuid>
 python3 bchoc.py verify
 ```
-
-### Commands supported
-
-- `init`
-- `add`
-- `checkout`
-- `checkin`
-- `remove`
-- `show cases`
-- `show items`
-- `show history`
-- `verify`
-
-## Developer notes (what this project demonstrates)
-
-This repo showcases:
-
-- Binary file I/O + deterministic record parsing
-- CLI design and argument handling
-- Applied cryptography integration (`pycryptodome`)
-- Defensive validation + integrity verification logic
-- Test automation + repeatable workflows
-
-## Testing
-
-A test script is included:
-
-```sh
-python -m unittest
-```
-
-
-
