@@ -1,0 +1,11 @@
+# Generated ledgers / binaries
+blockchain.dat
+*.dat
+*.bin
+
+# Secrets
+.env
+
+# Python cache
+__pycache__/
+*.pyc
