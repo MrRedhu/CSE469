@@ -11,7 +11,7 @@ A **blockchain-inspired, append-only** chain-of-custody ledger for tracking digi
 - **Append-only binary ledger** (tamper-evident record of evidence handling)
 - **Integrity verification** to detect mutation, reordering, or broken linkage
 - **Encryption of sensitive identifiers** using `pycryptodome`
-- **Automated test script** included (`test_bchoc.sh`)
+- **Unit tests** included (`python -m unittest`)
 - Clear CLI flows for common custody actions
 
 ---
@@ -83,7 +83,7 @@ This repo showcases:
 A test script is included:
 
 ```sh
-bash test_bchoc.sh
+python -m unittest
 ```
 
 ## Hex inspection (optional)

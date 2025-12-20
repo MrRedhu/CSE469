@@ -48,7 +48,7 @@ AES_KEY = b"R0chLi4uLi4uLi4="  # Provided key (make sure PyCryptodome is install
 # Common Functions (used by both commands)
 # --------------------------------------------------------------------
 CREATOR_PWD = os.getenv("BCHOC_PASSWORD_CREATOR", "C67C")
-ROLE_NAME = {               # pwd  → owner string in block
+ROLE_NAME = {               # password -> owner role string in block
     os.getenv("BCHOC_PASSWORD_POLICE",     "P80P"): "POLICE",
     os.getenv("BCHOC_PASSWORD_ANALYST",    "A65A"): "ANALYST",
     os.getenv("BCHOC_PASSWORD_EXECUTIVE",  "E69E"): "EXECUTIVE",
@@ -87,7 +87,7 @@ def blockchain_is_sane(file_path: str):
             while True:
                 header = f.read(HEADER_SIZE)
                 if not header:
-                    break                      # EOF – finished cleanly
+                    break                      # EOF, finished cleanly
                 if len(header) != HEADER_SIZE:
                     return False, "incomplete header"
 
@@ -112,7 +112,7 @@ def blockchain_is_sane(file_path: str):
                         state.startswith(b"INITIAL")
                     ):
                         return False, "genesis mismatch"
-                    # (timestamp check removed – it’s harmless to ignore)
+                    # Timestamp check removed; it is safe to ignore.
                 # ---------- END GENESIS BRANCH ----------
 
                 last_block = header + data
@@ -253,10 +253,10 @@ def encrypt_item_id(item_id_str: str) -> bytes:
     """
     Encrypt a 4-byte evidence-item integer.
 
-    • Pack the integer BIG-endian (">I") to 4 bytes  
-    • Left-pad with 12 NUL bytes so the int is at the *end* of the 16-byte block  
-    • Encrypt the 16-byte block with AES-ECB  
-    • Return the 32-byte hex-encoded ciphertext (ASCII bytes)
+    - Pack the integer big-endian (">I") to 4 bytes
+    - Left-pad with 12 NUL bytes so the int is at the end of the 16-byte block
+    - Encrypt the 16-byte block with AES-ECB
+    - Return the 32-byte hex-encoded ciphertext (ASCII bytes)
     """
     try:
         item_int = int(item_id_str)           # ensure it is an int
@@ -267,7 +267,7 @@ def encrypt_item_id(item_id_str: str) -> bytes:
         sys.exit(1)
 
     int_bytes = struct.pack(">I", item_int)   # big-endian 4-byte integer
-    padded    = b'\x00' * 12 + int_bytes      # 16-byte block (12 × 00 then int)
+    padded    = b'\x00' * 12 + int_bytes      # 16-byte block (12x 00 then int)
     cipher    = AES.new(AES_KEY, AES.MODE_ECB)
     ciphertext = cipher.encrypt(padded)
 
@@ -653,7 +653,7 @@ def command_checkin():
     p.add_argument("-p", "--password", required=True)
     args = p.parse_args(sys.argv[2:])
 
-    role_txt = ROLE_NAME.get(args.password)          # ← keep role
+    role_txt = ROLE_NAME.get(args.password)          # keep role name
     if role_txt is None:
         print("> Invalid password", file=sys.stderr)
         sys.exit(1)
@@ -751,13 +751,13 @@ def command_remove():
         creator = original_creator(file_path, encrypted_item_id)
 
         # Use role name from creator password as owner
-        # For removal, it’s the most recent valid role, often the *last* check-in person
+        # For removal, it is the most recent valid role, often the last check-in person.
         if args.why == "RELEASED" and args.owner:
             owner_field = pad_field(args.owner, 12)
         else:
             owner_field = last_owner(file_path, encrypted_item_id)
 
-        # Construct header — NO data field, d_length = 0
+        # Construct header; no data field, d_length = 0.
         timestamp = datetime.datetime.now(datetime.timezone.utc).timestamp()
         d_length = 0
         data_bytes = b""
@@ -934,7 +934,7 @@ def command_show_history():
     if args.num_entries is not None:
         filtered = filtered[: args.num_entries]
 
-    # 7) Print exactly (no “> ”)
+    # 7) Print exactly (no extra prefixes)
     for e in filtered:
         print(f"Case:   {e['case']}")
         print(f"Item:   {e['item']}")
@@ -966,7 +966,7 @@ def command_summary():
         print("> Invalid case ID format", file=sys.stderr)
         sys.exit(1)
 
-    # ── counters ───────────────────────────────────────────────
+    # Counters by state for this case.
     unique_items         = set()
     cnt_in = cnt_out = cnt_disp = cnt_dest = cnt_rel = 0
 
@@ -975,7 +975,7 @@ def command_summary():
         _, _, c_enc, i_enc, state_b, *_ = struct.unpack(BLOCK_FORMAT, hdr)
 
         if c_enc != enc_case:
-            continue                                    # wrong case – skip
+            continue                                    # wrong case, skip
 
         state = state_b.rstrip(b"\0").decode("ascii")
         unique_items.add(i_enc)
@@ -988,7 +988,7 @@ def command_summary():
 
     total = len(unique_items)
 
-    # ── exact output ───────────────────────────────────────────
+    # Exact output required by the spec.
     print(f"Case Summary for Case ID: {args.case}")
     print(f"Total Evidence Items: {total}")
     print(f"Checked In: {cnt_in}")
