@@ -16,13 +16,6 @@ A **blockchain-inspired, append-only** chain-of-custody ledger for tracking digi
 
 ---
 
-## Demo (recommended)
-Add a short GIF here (30-60s): `init -> add -> checkout -> history -> verify`
-
-![Demo](docs/demo.gif)
-
----
-
 ## How it works (high level)
 
 1. Each action (e.g., *ADD*, *CHECKOUT*, *CHECKIN*, *REMOVE*) becomes a new record appended to a single on-disk ledger.
@@ -41,89 +34,80 @@ flowchart LR
   CLI -->|show/history| OUT[Human-readable output]
 ```
 
-Quick start
-Requirements
+## Quick start
 
-Python 3.x
+### Requirements
 
-pycryptodome
+- Python 3.x
+- `pycryptodome`
 
+```sh
 pip install pycryptodome
+```
 
-Run
+### Run
+
+```sh
 python3 bchoc.py init
 python3 bchoc.py add -c <case_uuid> -i <item_id> -g <creator> -p <password>
 python3 bchoc.py checkout -i <item_id> -p <password>
-python3 bchoc.py checkin  -i <item_id> -p <password>
+python3 bchoc.py checkin -i <item_id> -p <password>
 python3 bchoc.py show history -i <item_id> -p <password>
 python3 bchoc.py verify
+```
 
-Commands supported
+### Commands supported
 
-init
+- `init`
+- `add`
+- `checkout`
+- `checkin`
+- `remove`
+- `show cases`
+- `show items`
+- `show history`
+- `verify`
 
-add
-
-checkout
-
-checkin
-
-remove
-
-show cases
-
-show items
-
-show history
-
-verify
-
-(See README examples below for typical usage patterns.)
-
-Developer notes (what this project demonstrates)
+## Developer notes (what this project demonstrates)
 
 This repo showcases:
 
-Binary file I/O + deterministic record parsing
+- Binary file I/O + deterministic record parsing
+- CLI design and argument handling
+- Applied cryptography integration (`pycryptodome`)
+- Defensive validation + integrity verification logic
+- Test automation + repeatable workflows
 
-CLI design and argument handling
-
-Applied cryptography integration (pycryptodome)
-
-Defensive validation + integrity verification logic
-
-Test automation + repeatable workflows
-
-Testing
+## Testing
 
 A test script is included:
 
+```sh
 bash test_bchoc.sh
+```
 
-Hex inspection (optional)
+## Hex inspection (optional)
 
 If you want to view the raw binary ledger:
 
+```sh
 xxd blockchain.dat | less
 # or
 hexdump -C blockchain.dat | less
+```
 
-Roadmap (portfolio-friendly improvements)
+## Roadmap (portfolio-friendly improvements)
 
 If productionizing:
 
-Replace ECB-style patterns with an authenticated mode (e.g., AES-GCM)
+- Replace ECB-style patterns with an authenticated mode (e.g., AES-GCM)
+- Add explicit key-derivation (KDF) + per-record nonce/IV design
+- Add structured logging + JSON output mode for integrations
+- Add CI (GitHub Actions) to run tests on every push
 
-Add explicit key-derivation (KDF) + per-record nonce/IV design
-
-Add structured logging + JSON output mode for integrations
-
-Add CI (GitHub Actions) to run tests on every push
-
-Team / Contributions
+## Team / Contributions
 
 Built in a team setting. If you want to make this recruiter-friendly, list your contributions explicitly here:
 
-My contributions: <e.g., ledger parsing, verify logic, CLI UX, tests, crypto integration>
-
-Teammates: <names>
+- **My contributions:** <e.g., ledger parsing, verify logic, CLI UX, tests, crypto integration>
+- **Teammates:** <names>
