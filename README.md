@@ -86,22 +86,5 @@ A test script is included:
 python -m unittest
 ```
 
-## Hex inspection (optional)
 
-If you want to view the raw binary ledger:
-
-```sh
-xxd blockchain.dat | less
-# or
-hexdump -C blockchain.dat | less
-```
-
-## Roadmap (portfolio-friendly improvements)
-
-If productionizing:
-
-- Replace ECB-style patterns with an authenticated mode (e.g., AES-GCM)
-- Add explicit key-derivation (KDF) + per-record nonce/IV design
-- Add structured logging + JSON output mode for integrations
-- Add CI (GitHub Actions) to run tests on every push
 
