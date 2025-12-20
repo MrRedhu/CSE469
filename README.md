@@ -105,9 +105,3 @@ If productionizing:
 - Add structured logging + JSON output mode for integrations
 - Add CI (GitHub Actions) to run tests on every push
 
-## Team / Contributions
-
-Built in a team setting. If you want to make this recruiter-friendly, list your contributions explicitly here:
-
-- **My contributions:** <e.g., ledger parsing, verify logic, CLI UX, tests, crypto integration>
-- **Teammates:** <names>
